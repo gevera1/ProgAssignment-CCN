@@ -17,7 +17,7 @@ volatile int flag 	= 0;
 volatile int retransmit = 0;
 
 struct pkt {
-	char seqnum, acknum, data[BUFF_SIZE];
+	char seqnum, acknum, finnum, data[BUFF_SIZE];
 };
 
 void sigalarm( int sig ) 
@@ -34,8 +34,8 @@ void cli_loop( char *fp, int sockfd, const SA *pservaddr, socklen_t servlen )
 {
 	int	transmit, n;
 	char	seq;
-	struct	pkt *recv_pkt = (struct pkt *) malloc( BUFF_SIZE + 2 );
-	struct 	pkt *packet   = (struct pkt *) malloc( BUFF_SIZE + 2 );
+	struct	pkt *recv_pkt = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
+	struct 	pkt *packet   = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
 	time_t 	t;
 	double	time;
 
@@ -102,9 +102,9 @@ void cli_loop( char *fp, int sockfd, const SA *pservaddr, socklen_t servlen )
 	// Closing connection with packet smaller than 512 
 	char close_req[] = "request close\n";
 
-	packet 			= (struct pkt *) realloc(packet, BUFF_SIZE);
+	bzero(packet, BUFF_SIZE);
 	packet->seqnum 		= (char)( (seq + 1) % 2 );
-	
+	packet->finnum		= (char) 1;
 	bzero(packet->data, sizeof(close_req));
 	
 	printf("Closing Packet Size: %ld\n", sizeof(close_req));	
