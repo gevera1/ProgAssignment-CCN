@@ -14,7 +14,7 @@
 #define LOSS_RATE	0	// percent
 
 struct pkt {
-	char seqnum, acknum, data[BUFF_SIZE];
+	char seqnum, acknum, finnum, data[BUFF_SIZE];
 };
 
 void serv_loop( int sockfd, SA * pcliaddr, socklen_t clilen ) 
@@ -25,21 +25,21 @@ void serv_loop( int sockfd, SA * pcliaddr, socklen_t clilen )
 	int 			n, write_chk;
 	char			s_n, *len_chk;
 	socklen_t		len;
-	struct	pkt		*recv_pkt = (struct pkt *) malloc(BUFF_SIZE + 2);
+	struct	pkt		*recv_pkt = (struct pkt *) malloc(BUFF_SIZE +  3 * sizeof(char));
 	struct	pkt 		*send_pkt = (struct pkt *) malloc( BUFF_SIZE ); 
 
 	FILE * out_file = fopen("outputfile.txt", "w");
 	printf("Opening File...\n");
 	while (1) 
 	{
-		bzero(recv_pkt, BUFF_SIZE + 2);
+		bzero(recv_pkt, BUFF_SIZE + 3 * sizeof(char));
 		bzero(send_pkt, BUFF_SIZE);
 
 		bzero(recv_pkt->data, BUFF_SIZE);	
 
 		len 	= clilen;
 	
-		printf("Waiting for packet\nExpected Size: %ld\n", BUFF_SIZE+2);
+		printf("Waiting for packet...\n");
 		while ( (n = Recvfrom(sockfd, recv_pkt, sizeof(*recv_pkt), 0, pcliaddr, &len)) < 1 ) {	// Get message from socket
 			if ( n < 0 ) { fprintf(stderr, "ERROR: Recvfrom() error\n"); }
 		}
@@ -52,23 +52,23 @@ void serv_loop( int sockfd, SA * pcliaddr, socklen_t clilen )
 	
 		printf("Packet received.\n\tString length: %ld\n\tString: %s\n", strlen(recv_pkt->data), recv_pkt->data);
 
+		if (rand() % 100 < LOSS_RATE) continue;	
+		
+		Sendto(sockfd, send_pkt, sizeof(*send_pkt), 0, pcliaddr, len);
+		
+		if ( recv_pkt->finnum ) {
+			// free(recv_pkt->data);
+			free(recv_pkt);
+			free(send_pkt);
+			break;
+		}
 		
 		write_chk = fputs(recv_pkt->data, out_file); // Write to file
 		if (write_chk == EOF) { 
 			fprintf(stderr, "ERROR: write to file failed\n"); 
 			fclose(out_file);
 			return; 
-		} 
-		if (rand() % 100 < LOSS_RATE) continue;
-		
-		Sendto(sockfd, send_pkt, sizeof(*send_pkt), 0, pcliaddr, len);
-		
-		if ( 0 ) {
-			// free(recv_pkt->data);
-			free(recv_pkt);
-			free(send_pkt);
-			break;
-		}
+		} 	
 	}
 	fclose(out_file);
 	return;
