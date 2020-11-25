@@ -36,7 +36,8 @@ void cli_loop( char *fp, int sockfd, const SA *pservaddr, socklen_t servlen )
 	char	seq;
 	struct	pkt *recv_pkt = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
 	struct 	pkt *packet   = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
-	struct timeval start, stop;	
+  
+	struct timeval start, stop; 
 	double	time;
 
 	// Open input file
