@@ -10,7 +10,7 @@
 #define PORT_NUM 	9093	
 #define RETR_TIMER 	1	// seconds
 #define RETR_LIM	5	// times
-#define AVERAGE_DELAY	100 	// microseconds
+#define AVERAGE_DELAY	400000	// microseconds
 #define LOSS_RATE	5	// percent
 
 volatile int flag 	= 0;
@@ -36,7 +36,8 @@ void cli_loop( char *fp, int sockfd, const SA *pservaddr, socklen_t servlen )
 	char	seq;
 	struct	pkt *recv_pkt = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
 	struct 	pkt *packet   = (struct pkt *) malloc( BUFF_SIZE + 3 * sizeof(char) );
-	time_t 	t;
+  
+	struct timeval start, stop; 
 	double	time;
 
 	// Open input file
@@ -54,73 +55,90 @@ void cli_loop( char *fp, int sockfd, const SA *pservaddr, socklen_t servlen )
 	transmit = 0;
 	char string[BUFF_SIZE];
 	
-	t = clock();
+	gettimeofday(&start, NULL);
 
-	printf("Begin reading file\n");
+//	printf("Begin reading file\n");
 	while (!feof(in_file)) {
-		while( fgets(string, BUFF_SIZE+1, in_file) ) {
+		while( fgets(string, BUFF_SIZE, in_file) ) {
 		// While loop reads contents of entire file and constructs them into packets
 
-			bzero(packet, BUFF_SIZE + 2);
+			transmit = 0;
+
+			bzero(packet, BUFF_SIZE + 3 * sizeof(char));
 			bzero(packet->data, sizeof(string));
-			bzero(recv_pkt, BUFF_SIZE + 2);
+			bzero(recv_pkt, BUFF_SIZE + 3 * sizeof(char));
 	
 			// Turn 512 bytes of data into a packet
 			if (seq == 1) 	{ packet->seqnum = 0; seq = 0; }
 			else 		{ packet->seqnum = 1; seq = 1; }
 		
-			printf("Packet size: %ld\nString length: %ld\n", sizeof(*packet), strlen(string));
+//			printf("Packet size: %ld\nString length: %ld\n", sizeof(*packet), strlen(string));
 			
 			strcpy(packet->data, string);	
-		
+			packet->finnum = 0;	
+	
 		send_packet:
-			retransmit = 0;	
-			if (transmit == RETR_LIM) { fprintf(stderr, "Retransmission error\n"); flag = 1; break; }
+			// If the number of transmissions reaches limit, break	
+			if (transmit == RETR_LIM) { 
+				fprintf(stderr, "Retransmission error\n"); 
+				flag = 1; 
+				break; 
+			}
 		
-			printf("Sending Packet...\nSize: %ld\n%s\n", sizeof(packet->data), packet->data);
+//			printf("Sending Packet...\nSize: %ld\n", sizeof(packet->data));
 			Sendto(sockfd, packet, sizeof(*packet), 0, pservaddr, servlen);
 		
-			transmit++;
-			alarm(RETR_TIMER);
-			usleep(AVERAGE_DELAY);
+			transmit++;		// Increment number of transmissions
+			alarm(RETR_TIMER);	// Set timer to wait for ACK
+			usleep(AVERAGE_DELAY);	// Simulate propagation delay
 		
-			printf("Waiting for ACK\n");	
-			while ( ( n = Recvfrom(sockfd, recv_pkt, sizeof(*recv_pkt), 0, NULL, NULL) ) < 1 );	
+//			printf("Waiting for ACK...\n");		
 	
-			if (retransmit) goto send_packet;
-	
+			while ( ( n = Recvfrom(sockfd, recv_pkt, sizeof(*recv_pkt), 0, NULL, NULL) ) < 1 ) {
+				if (retransmit) { printf("\nRetransmitting...\n"); retransmit = 0; goto send_packet; }	 
+				// if retransmit flag is signaled, try again
+			}
+		
 			transmit = 0; 	// Reset retransmission count
 	
-			if (recv_pkt->acknum != seq) {// OUT OF ORDER packet
+			if (recv_pkt->acknum != seq) {	// Handles OUT OF ORDER packet
 				fprintf(stderr, "ERROR: Out of Order ACK!\n");
 				fclose(in_file);
-					goto send_packet;
+				goto send_packet;	// Retransmits in case of out of order ACK
 			}
+//			printf("Received ACK\n\n");
 
-		}		
+		}	
+		if (flag) break;	
 	}
-	// Closing connection with packet smaller than 512 
-	char close_req[] = "request close\n";
+	if (!flag) {
+		// Closing connection with packet smaller than 512 
+		char close_req[] = "request close\n";
 
-	bzero(packet, BUFF_SIZE);
-	packet->seqnum 		= (char)( (seq + 1) % 2 );
-	packet->finnum		= (char) 1;
-	bzero(packet->data, sizeof(close_req));
+		// Reconfigure packet to send final message (Close request)
+		bzero(packet, BUFF_SIZE);
+		packet->seqnum 		= (char)( (seq + 1) % 2 );
+		packet->finnum		= (char) 1;
+		bzero(packet->data, sizeof(close_req));
+		
+//	printf("Closing Packet Size: %ld\n", sizeof(close_req));	
 	
-	printf("Closing Packet Size: %ld\n", sizeof(close_req));	
-	
-	strcpy(packet->data, close_req);		
-	
-	Sendto(sockfd, packet, sizeof(*packet), 0, pservaddr, servlen);
-	
-	while ( ( n = Recvfrom(sockfd, recv_pkt, sizeof(*recv_pkt), 0, NULL, NULL) ) < 1 );
-	
-	printf("Received ACK\n");
+		strcpy(packet->data, close_req);		
 
-	time = (double)(clock()-t)/CLOCKS_PER_SEC;
+//		printf("Sending Last Packet...\nSize: %ld\n", sizeof(packet->data));
+		
+		Sendto(sockfd, packet, sizeof(*packet), 0, pservaddr, servlen);
+	
+		while ( ( n = Recvfrom(sockfd, recv_pkt, sizeof(*recv_pkt), 0, NULL, NULL) ) < 1 );
+	
+//		printf("Received ACK\n\n");
+	
+		gettimeofday(&stop, NULL);
 
-	if (!flag) 	{ printf("sFTP: file sent successfully to 127.0.0.1 in %.3lf secs\n", time); }  
-	else 		{ printf("sFTP: file transfer unsuccessful: packet retransmission limit reached\n"); }
+		double time = (double) ( (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec )/1000000;
+
+		printf("sFTP: file sent successfully to 127.0.0.1 in %.5lf secs\n", time); 
+	} else{ printf("sFTP: file transfer unsuccessful: packet retransmission limit reached\n"); }
 	
 	// Free memory to prevent leaks
 	free(packet);
